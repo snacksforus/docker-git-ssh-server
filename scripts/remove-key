@@ -1,0 +1,160 @@
+#!/bin/zsh
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Function to print error and exit
+error_exit() {
+    echo -e "${RED}Error: $1${NC}" >&2
+    exit 1
+}
+
+# Function to print success
+success() {
+    echo -e "${GREEN}$1${NC}"
+}
+
+# Function to print warning
+warning() {
+    echo -e "${YELLOW}Warning: $1${NC}"
+}
+
+# Function to print info
+info() {
+    echo -e "${BLUE}$1${NC}"
+}
+
+# Check if search pattern argument is provided
+if [ $# -ne 1 ]; then
+    error_exit "Usage: $0 <search-pattern>
+
+    Examples:
+      $0 'user@hostname'        # Remove by comment
+      $0 'john@laptop'          # Remove specific user's key
+      $0 'SHA256:AbC123...'     # Remove by fingerprint"
+fi
+
+SEARCH_PATTERN="$1"
+CONTAINER_NAME="${DOCKER_CONTAINER:-git-server}"
+TEMP_FILE="/tmp/authorized_keys.tmp"
+
+# Check if Docker is available
+if ! command -v docker &> /dev/null; then
+    error_exit "Docker command not found. Please install Docker."
+fi
+
+# Check if container is running
+if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+    error_exit "Container '${CONTAINER_NAME}' is not running"
+fi
+
+echo "Searching for keys matching: ${SEARCH_PATTERN}"
+echo ""
+
+# Get authorized_keys content
+AUTHORIZED_KEYS=$(docker exec "${CONTAINER_NAME}" cat /home/git/.ssh/authorized_keys 2>/dev/null || echo "")
+
+if [ -z "$AUTHORIZED_KEYS" ]; then
+    error_exit "No authorized_keys file found or file is empty"
+fi
+
+# Create temporary file with current keys
+echo "$AUTHORIZED_KEYS" > "$TEMP_FILE"
+
+# Search for matching keys and display them
+MATCHING_LINES=$(grep -n "$SEARCH_PATTERN" "$TEMP_FILE" || true)
+
+if [ -z "$MATCHING_LINES" ]; then
+    rm -f "$TEMP_FILE"
+    error_exit "No keys found matching: ${SEARCH_PATTERN}"
+fi
+
+# Display matching keys
+info "Found the following matching key(s):"
+echo ""
+
+LINE_NUMBERS=()
+while IFS= read -r line; do
+    LINE_NUM=$(echo "$line" | cut -d: -f1)
+    LINE_NUMBERS+=("$LINE_NUM")
+
+    KEY_CONTENT=$(echo "$line" | cut -d: -f2-)
+
+    # Extract key type and comment
+    KEY_TYPE=$(echo "$KEY_CONTENT" | awk '{print $1}')
+    KEY_COMMENT=$(echo "$KEY_CONTENT" | awk '{for(i=3;i<=NF;i++) printf $i" "; print ""}' | xargs)
+
+    # Try to get fingerprint using ssh-keygen if available
+    if command -v ssh-keygen &> /dev/null; then
+        # Create temp file for this specific key
+        SINGLE_KEY_FILE="/tmp/single_key_$$.pub"
+        echo "$KEY_CONTENT" > "$SINGLE_KEY_FILE"
+
+        if FINGERPRINT=$(ssh-keygen -l -f "$SINGLE_KEY_FILE" 2>/dev/null); then
+            echo "  [$LINE_NUM] $KEY_TYPE - $KEY_COMMENT"
+            echo "      Fingerprint: $FINGERPRINT"
+        else
+            echo "  [$LINE_NUM] $KEY_CONTENT"
+        fi
+
+        rm -f "$SINGLE_KEY_FILE"
+    else
+        echo "  [$LINE_NUM] $KEY_TYPE - $KEY_COMMENT"
+    fi
+    echo ""
+done <<< "$MATCHING_LINES"
+
+# Count matches
+MATCH_COUNT=$(echo "$MATCHING_LINES" | wc -l | xargs)
+
+# Ask for confirmation
+if [ "$MATCH_COUNT" -eq 1 ]; then
+    warning "This will remove 1 key from the authorized_keys file."
+else
+    warning "This will remove $MATCH_COUNT keys from the authorized_keys file."
+fi
+
+read "CONFIRM?Are you sure you want to continue? (yes/no): "
+
+if [ "$CONFIRM" != "yes" ] && [ "$CONFIRM" != "y" ]; then
+    rm -f "$TEMP_FILE"
+    echo "Operation cancelled."
+    exit 0
+fi
+
+# Remove matching lines
+sed -i.bak "/$SEARCH_PATTERN/d" "$TEMP_FILE"
+
+# Verify at least one line was removed
+REMOVED_COUNT=$(($(wc -l < "$TEMP_FILE.bak") - $(wc -l < "$TEMP_FILE")))
+
+if [ "$REMOVED_COUNT" -eq 0 ]; then
+    rm -f "$TEMP_FILE" "$TEMP_FILE.bak"
+    error_exit "Failed to remove keys (no changes made)"
+fi
+
+# Upload the modified authorized_keys back to container by piping through stdin
+# Run as git user to avoid permission issues with --read-only containers
+# This avoids writing to container's filesystem (works with --read-only)
+if ! cat "$TEMP_FILE" | docker exec -i -u git "${CONTAINER_NAME}" sh -c "cat > /home/git/.ssh/authorized_keys && \
+  chmod 600 /home/git/.ssh/authorized_keys"; then
+    rm -f "$TEMP_FILE" "$TEMP_FILE.bak"
+    error_exit "Failed to update authorized_keys in container"
+fi
+
+# Clean up temp files
+rm -f "$TEMP_FILE" "$TEMP_FILE.bak"
+
+success "Successfully removed $REMOVED_COUNT key(s) from ${CONTAINER_NAME}"
+
+# Count remaining keys
+REMAINING_KEYS=$(docker exec "${CONTAINER_NAME}" sh -c "grep -c '^ssh-' /home/git/.ssh/authorized_keys 2>/dev/null || true")
+if [ -z "$REMAINING_KEYS" ]; then
+    REMAINING_KEYS=0
+fi
+echo "Remaining authorized keys: ${REMAINING_KEYS}"

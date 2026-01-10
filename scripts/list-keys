@@ -1,0 +1,130 @@
+#!/bin/zsh
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Function to print error and exit
+error_exit() {
+    echo -e "${RED}Error: $1${NC}" >&2
+    exit 1
+}
+
+# Function to print success
+success() {
+    echo -e "${GREEN}$1${NC}"
+}
+
+# Function to print info
+info() {
+    echo -e "${BLUE}$1${NC}"
+}
+
+# Function to print header
+header() {
+    echo -e "${CYAN}$1${NC}"
+}
+
+CONTAINER_NAME="${DOCKER_CONTAINER:-git-server}"
+
+# Check if Docker is available
+if ! command -v docker &> /dev/null; then
+    error_exit "Docker command not found. Please install Docker."
+fi
+
+# Check if container is running
+if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+    error_exit "Container '${CONTAINER_NAME}' is not running"
+fi
+
+# Get authorized_keys content
+AUTHORIZED_KEYS=$(docker exec "${CONTAINER_NAME}" cat /home/git/.ssh/authorized_keys 2>/dev/null || echo "")
+
+if [ -z "$AUTHORIZED_KEYS" ]; then
+    error_exit "No authorized_keys file found or file is empty"
+fi
+
+# Count total keys
+TOTAL_KEYS=$(echo "$AUTHORIZED_KEYS" | grep -c '^ssh-' 2>/dev/null || true)
+if [ -z "$TOTAL_KEYS" ] || [ "$TOTAL_KEYS" = "" ]; then
+    TOTAL_KEYS=0
+fi
+
+header "=========================================="
+header "  SSH Authorized Keys for ${CONTAINER_NAME}"
+header "=========================================="
+echo ""
+info "Total keys: ${TOTAL_KEYS}"
+echo ""
+
+# Create temp file for processing
+TEMP_FILE="/tmp/authorized_keys_$$"
+echo "$AUTHORIZED_KEYS" > "$TEMP_FILE"
+
+# Process each key
+LINE_NUM=0
+while IFS= read -r KEY_LINE; do
+    # Skip empty lines and comments
+    if [ -z "$KEY_LINE" ] || [[ "$KEY_LINE" =~ ^[[:space:]]*# ]]; then
+        continue
+    fi
+
+    # Skip non-SSH key lines
+    if ! echo "$KEY_LINE" | grep -q '^ssh-'; then
+        continue
+    fi
+
+    LINE_NUM=$((LINE_NUM + 1))
+
+    # Extract key components
+    KEY_TYPE=$(echo "$KEY_LINE" | awk '{print $1}')
+    KEY_DATA=$(echo "$KEY_LINE" | awk '{print $2}')
+    KEY_COMMENT=$(echo "$KEY_LINE" | awk '{for(i=3;i<=NF;i++) printf $i" "; print ""}' | xargs)
+
+    echo "[$LINE_NUM] ${KEY_TYPE}"
+
+    # Try to get detailed info with ssh-keygen if available
+    if command -v ssh-keygen &> /dev/null; then
+        SINGLE_KEY_FILE="/tmp/single_key_$$.pub"
+        echo "$KEY_LINE" > "$SINGLE_KEY_FILE"
+
+        if KEY_INFO=$(ssh-keygen -l -f "$SINGLE_KEY_FILE" 2>/dev/null); then
+            # Parse ssh-keygen output: "bits fingerprint comment (type)"
+            BITS=$(echo "$KEY_INFO" | awk '{print $1}')
+            FINGERPRINT=$(echo "$KEY_INFO" | awk '{print $2}')
+
+            echo "    Bits:        $BITS"
+            echo "    Fingerprint: $FINGERPRINT"
+        fi
+
+        rm -f "$SINGLE_KEY_FILE"
+    fi
+
+    if [ -n "$KEY_COMMENT" ]; then
+        echo "    Comment:     $KEY_COMMENT"
+    else
+        echo "    Comment:     (none)"
+    fi
+
+    # Show truncated key data
+    KEY_DATA_TRUNCATED="${KEY_DATA:0:40}...${KEY_DATA: -20}"
+    echo "    Key:         $KEY_DATA_TRUNCATED"
+
+    echo ""
+done < "$TEMP_FILE"
+
+# Clean up
+rm -f "$TEMP_FILE"
+
+if [ "$TOTAL_KEYS" -eq 0 ]; then
+    echo "No SSH keys found."
+elif [ "$TOTAL_KEYS" -eq 1 ]; then
+    success "1 authorized key found."
+else
+    success "$TOTAL_KEYS authorized keys found."
+fi

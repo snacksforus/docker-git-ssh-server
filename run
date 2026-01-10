@@ -1,0 +1,29 @@
+#!/bin/bash
+set -e
+
+CONTAINER_NAME="${DOCKER_CONTAINER:-git-server}"
+IMAGE_NAME="${DOCKER_IMAGE:-git-server}"
+
+echo "Starting container: ${CONTAINER_NAME}"
+docker run -d \
+  --name "${CONTAINER_NAME}" \
+  --hostname git \
+  -p 2222:22 \
+  -v git-repos:/home/git \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,size=10m \
+  --tmpfs /run:rw,noexec,nosuid,size=10m \
+  --memory="512m" \
+  --memory-swap="512m" \
+  --cpus="1" \
+  --pids-limit=100 \
+  --cap-drop=ALL \
+  --cap-add=CHOWN \
+  --cap-add=SETGID \
+  --cap-add=SETUID \
+  --cap-add=DAC_OVERRIDE \
+  --cap-add=AUDIT_WRITE \
+  --cap-add=SYS_CHROOT \
+  --security-opt=no-new-privileges:true \
+  --restart=unless-stopped \
+  "${IMAGE_NAME}"

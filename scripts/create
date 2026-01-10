@@ -1,0 +1,57 @@
+#!/bin/sh
+set -e
+
+if [ $# -ne 1 ]; then
+  echo "Usage: create <repository-name>"
+  exit 1
+fi
+
+REPO_NAME="$1"
+
+# Validate repository name length (max 100 characters)
+if [ ${#REPO_NAME} -gt 100 ]; then
+  echo "Error: Repository name too long (max 100 characters)."
+  exit 1
+fi
+
+# Prevent path traversal attacks
+if echo "$REPO_NAME" | grep -qE '(\.\.|\/)'; then
+  echo "Error: Repository name cannot contain '..' or '/'."
+  exit 1
+fi
+
+# Validate repository name (alphanumeric, dot, dash, underscore only)
+if ! echo "$REPO_NAME" | grep -qE "^[a-zA-Z0-9._-]+$"; then
+  echo "Error: Invalid repository name. Use only alphanumeric characters, dots, dashes, and underscores."
+  exit 1
+fi
+
+# Must start with alphanumeric character
+if ! echo "$REPO_NAME" | grep -qE "^[a-zA-Z0-9]"; then
+  echo "Error: Repository name must start with an alphanumeric character."
+  exit 1
+fi
+
+# Add .git extension if not present
+if ! echo "$REPO_NAME" | grep -q "\.git$"; then
+  REPO_NAME="${REPO_NAME}.git"
+fi
+
+REPO_PATH="/home/git/$REPO_NAME"
+
+# Additional path validation (ensure we're in /home/git)
+REAL_PATH=$(readlink -f "$REPO_PATH" 2>/dev/null || echo "$REPO_PATH")
+if ! echo "$REAL_PATH" | grep -q "^/home/git/"; then
+  echo "Error: Invalid repository path."
+  exit 1
+fi
+
+# Check if repository already exists
+if [ -d "$REPO_PATH" ]; then
+  echo "Error: Repository $REPO_NAME already exists."
+  exit 1
+fi
+
+# Create bare repository
+git init --bare --shared=false "$REPO_PATH"
+echo "Created repository: $REPO_NAME"

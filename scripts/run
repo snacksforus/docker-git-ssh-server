@@ -1,0 +1,17 @@
+#!/bin/sh
+set -e
+
+echo "Initializing Git server..."
+
+# Sync git-shell commands to volume (delete removed commands)
+echo "Syncing git-shell commands..."
+mkdir -p /home/git/git-shell-commands
+
+# Use rsync to sync and delete removed files
+rsync --archive --verbose --delete /usr/local/share/git-shell-commands/ /home/git/git-shell-commands/
+
+echo "Starting SSH daemon..."
+# Start SSH daemon in foreground
+# -D: Don't detach (run in foreground)
+# -e: Log to stderr
+exec /usr/sbin/sshd -D -e

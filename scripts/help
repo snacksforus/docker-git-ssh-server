@@ -1,0 +1,53 @@
+#!/bin/sh
+cat << 'EOF'
+Git Server - Available Commands
+================================
+
+list
+  Lists all Git repositories on the server.
+  Returns repository names with .git extension.
+
+  Usage:
+    ssh -p 2222 git@host list
+
+create <repository-name>
+  Creates a new bare Git repository.
+  Repository name must contain only alphanumeric characters, dots, dashes, and underscores.
+  Automatically adds .git extension if not present.
+
+  Usage:
+    ssh -p 2222 git@host create myproject
+
+  Example:
+    ssh -p 2222 git@host create my-app
+    # Creates: my-app.git
+
+help
+  Displays this help message.
+
+  Usage:
+    ssh -p 2222 git@host help
+
+Git Operations
+==============
+
+Clone a repository:
+  git clone ssh://git@host:2222/home/git/<repository-name>.git
+
+Push to a repository:
+  git remote add origin ssh://git@host:2222/home/git/<repository-name>.git
+  git push -u origin main
+
+Pull from a repository:
+  git pull origin main
+
+Notes
+=====
+
+- All repositories are bare repositories (no working directory)
+- SSH key authentication is required
+- Git-shell restricts access to Git commands only
+- Repository names have a maximum length of 100 characters
+- Contact your administrator to add/remove SSH keys
+
+EOF
