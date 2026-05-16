@@ -44,10 +44,13 @@ RUN mkdir -p /etc/ssh && \
     echo "LoginGraceTime 30" >> /etc/ssh/sshd_config && \
     echo "ClientAliveInterval 300" >> /etc/ssh/sshd_config && \
     echo "ClientAliveCountMax 2" >> /etc/ssh/sshd_config && \
-    echo "PrintMotd no" >> /etc/ssh/sshd_config
+    echo "PrintMotd no" >> /etc/ssh/sshd_config && \
+    sed -i '/^#\?HostKey /d' /etc/ssh/sshd_config && \
+    echo "HostKey /etc/ssh/host-keys/ssh_host_ed25519_key" >> /etc/ssh/sshd_config && \
+    echo "HostKey /etc/ssh/host-keys/ssh_host_rsa_key" >> /etc/ssh/sshd_config
 
-# Generate SSH host keys at build time
-RUN ssh-keygen -A
+# Create mount point for host-supplied SSH host keys
+RUN mkdir -p /etc/ssh/host-keys
 
 # Create git-shell-commands directory in permanent location (outside volume)
 RUN mkdir -p /usr/local/share/git-shell-commands

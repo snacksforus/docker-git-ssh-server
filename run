@@ -3,6 +3,19 @@ set -e
 
 CONTAINER_NAME="${DOCKER_CONTAINER:-git-server}"
 IMAGE_NAME="${DOCKER_IMAGE:-git-server}"
+SSH_KEY_DIR="${HOME}/run/git-server"
+
+mkdir -p "${SSH_KEY_DIR}"
+
+if [ ! -f "${SSH_KEY_DIR}/ssh_host_ed25519_key" ]; then
+    echo "Generating SSH host key (ed25519)..."
+    ssh-keygen -t ed25519 -f "${SSH_KEY_DIR}/ssh_host_ed25519_key" -N ""
+fi
+if [ ! -f "${SSH_KEY_DIR}/ssh_host_rsa_key" ]; then
+    echo "Generating SSH host key (rsa)..."
+    ssh-keygen -t rsa -b 4096 -f "${SSH_KEY_DIR}/ssh_host_rsa_key" -N ""
+fi
+chmod 600 "${SSH_KEY_DIR}"/ssh_host_*_key
 
 echo "Starting container: ${CONTAINER_NAME}"
 docker run -d \
@@ -10,6 +23,7 @@ docker run -d \
   --hostname git \
   -p 2222:22 \
   -v git-repos:/home/git \
+  -v "${SSH_KEY_DIR}:/etc/ssh/host-keys:ro" \
   --read-only \
   --tmpfs /tmp:rw,noexec,nosuid,size=10m \
   --tmpfs /run:rw,noexec,nosuid,size=10m \
